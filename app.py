@@ -130,6 +130,15 @@ def get_price(product_name):
         return "N/A"
 
 
+def safe_price_float(price_str):
+    """Convert any price representation (str or number) to float. Returns 0.0 on failure."""
+    try:
+        cleaned = str(price_str).replace('~', '').replace('$', '').replace(',', '').strip()
+        return float(cleaned) if cleaned and cleaned != 'N/A' else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def analyze_compare(review_text, product_name):
     """Like analyze_sentiment but also returns a price_estimate."""
     if not GEMINI_API_KEY:
@@ -689,6 +698,9 @@ with tab_compare:
             data_b = get_reviews_data(product_b)
 
         if data_a and data_b:
+            with st.spinner("Fetching live prices…"):
+                scraped_price_a = get_price(product_a)
+                scraped_price_b = get_price(product_b)
             with st.spinner("Running AI analysis on both products…"):
                 result_a = analyze_compare(data_a, product_a)
                 time.sleep(2)  # Avoid quota collision
@@ -703,8 +715,11 @@ with tab_compare:
                 cons_b  = result_b.get('cons', [])
                 vibe_a  = result_a.get('vibe', '')
                 vibe_b  = result_b.get('vibe', '')
-                price_a = result_a.get('price', 'N/A')
-                price_b = result_b.get('price', 'N/A')
+                # Use live scraped price; fall back to AI estimate if unavailable
+                ai_price_a = result_a.get('price', 'N/A')
+                ai_price_b = result_b.get('price', 'N/A')
+                price_a = scraped_price_a if scraped_price_a != 'N/A' else ai_price_a
+                price_b = scraped_price_b if scraped_price_b != 'N/A' else ai_price_b
                 label_a, color_a = score_to_label(score_a)
                 label_b, color_b = score_to_label(score_b)
                 winner  = product_a if score_a >= score_b else product_b
@@ -714,7 +729,12 @@ with tab_compare:
 
                 ca, cb = st.columns(2, gap="medium")
                 with ca:
-                    winner_html = '<div class="winner-badge">🏆 Winner</div>' if score_a >= score_b else ''
+                    if score_a > score_b:
+                        winner_html = '<div class="winner-badge">🏆 Winner</div>'
+                    elif score_a == score_b:
+                        winner_html = '<div class="winner-badge" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:rgba(255,255,255,0.45)!important;">🤝 Tie</div>'
+                    else:
+                        winner_html = ''
                     st.markdown(f"""
                     <div class="gc gc-amber compare-score-card">
                         <span class="compare-product-name">{product_a}</span>
@@ -725,7 +745,12 @@ with tab_compare:
                         <div class="verdict-strip">{vibe_a}</div>
                     </div>""", unsafe_allow_html=True)
                 with cb:
-                    winner_html_b = '<div class="winner-badge">🏆 Winner</div>' if score_b > score_a else ''
+                    if score_b > score_a:
+                        winner_html_b = '<div class="winner-badge">🏆 Winner</div>'
+                    elif score_a == score_b:
+                        winner_html_b = '<div class="winner-badge" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:rgba(255,255,255,0.45)!important;">🤝 Tie</div>'
+                    else:
+                        winner_html_b = ''
                     st.markdown(f"""
                     <div class="gc gc-blue compare-score-card">
                         <span class="compare-product-name">{product_b}</span>
@@ -748,7 +773,15 @@ with tab_compare:
 
                 pa_col, pb_col = st.columns(2, gap="medium")
                 with pa_col:
-                    better_val = "Better value" if score_a / max(1, float(price_a.replace('~$','').replace(',','') or 1)) > score_b / max(1, float(price_b.replace('~$','').replace(',','') or 1)) else ""
+                    try:
+                        pf_a = safe_price_float(price_a)
+                        pf_b = safe_price_float(price_b)
+                        if pf_a > 0 and pf_b > 0:
+                            better_val = "Better value" if (score_a / pf_a) > (score_b / pf_b) else ""
+                        else:
+                            better_val = ""
+                    except Exception:
+                        better_val = ""
                     val_badge  = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val}</div>' if better_val else ''
                     st.markdown(f"""
                     <div class="gc" style="text-align:center;padding:1.4rem 1rem;">
@@ -759,9 +792,12 @@ with tab_compare:
                     </div>""", unsafe_allow_html=True)
                 with pb_col:
                     try:
-                        va = score_a / max(1, float(price_a.replace('~$','').replace(',','')))
-                        vb = score_b / max(1, float(price_b.replace('~$','').replace(',','')))
-                        better_val_b = "Better value" if vb > va else ""
+                        pf_a = safe_price_float(price_a)
+                        pf_b = safe_price_float(price_b)
+                        if pf_a > 0 and pf_b > 0:
+                            better_val_b = "Better value" if (score_b / pf_b) > (score_a / pf_a) else ""
+                        else:
+                            better_val_b = ""
                     except Exception:
                         better_val_b = ""
                     val_badge_b = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val_b}</div>' if better_val_b else ''
