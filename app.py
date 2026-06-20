@@ -1,4 +1,5 @@
 import os
+import html as _html
 import json
 import time
 import requests
@@ -7,6 +8,10 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+def h(text):
+    """HTML-escape user/AI text so it never breaks the surrounding HTML structure."""
+    return _html.escape(str(text))
 
 # ─── 1. CONFIGURATION ────────────────────────────────────────
 load_dotenv()
@@ -22,8 +27,8 @@ def get_reviews_data(product_name):
         return None
     url = "https://google.serper.dev/search"
     payload = {
-        "q": f"{product_name} user reviews pros cons reddit amazon",
-        "num": 10, "gl": "us", "autocorrect": True
+        "q": f"{product_name} user reviews pros cons India Flipkart Amazon India price",
+        "num": 10, "gl": "in", "hl": "en", "autocorrect": True
     }
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
     try:
@@ -102,39 +107,51 @@ def analyze_sentiment(review_text, product_name):
 # ─── 3. COMPARE HELPERS (NEW) ────────────────────────────────
 
 def get_price(product_name):
-    """Fetch estimated retail price via Serper shopping search."""
+    """Fetch estimated retail price via Serper shopping search (India, INR)."""
     if not SERPER_API_KEY:
-        return "N/A"
+        return None
     url = "https://google.serper.dev/shopping"
-    payload = {"q": product_name, "num": 3, "gl": "us"}
+    # Try multiple queries to maximise the chance of finding a price
+    queries = [
+        f"{product_name} price India",
+        f"{product_name} buy online India",
+        product_name,
+    ]
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        items = response.json().get('shopping', [])
-        prices = []
-        for item in items:
-            p = item.get('price', '')
-            if p:
-                # Strip currency symbol and commas, parse float
-                cleaned = p.replace('$', '').replace(',', '').strip()
-                try:
-                    prices.append(float(cleaned))
-                except ValueError:
-                    pass
-        if prices:
-            avg = sum(prices) / len(prices)
-            return f"~${avg:,.0f}"
-        return "N/A"
-    except Exception:
-        return "N/A"
+    for query in queries:
+        try:
+            payload = {"q": query, "num": 5, "gl": "in", "hl": "en"}
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+            items = response.json().get('shopping', [])
+            prices = []
+            for item in items:
+                p = item.get('price', '')
+                if p:
+                    # Strip ₹, Rs., $, commas etc.
+                    cleaned = p.replace('₹', '').replace('Rs.', '').replace('Rs', '')\
+                               .replace('$', '').replace(',', '').strip()
+                    try:
+                        prices.append(float(cleaned))
+                    except ValueError:
+                        pass
+            if prices:
+                avg = sum(prices) / len(prices)
+                return f"~₹{avg:,.0f}"
+        except Exception:
+            continue
+    return None
 
 
 def safe_price_float(price_str):
     """Convert any price representation (str or number) to float. Returns 0.0 on failure."""
     try:
-        cleaned = str(price_str).replace('~', '').replace('$', '').replace(',', '').strip()
-        return float(cleaned) if cleaned and cleaned != 'N/A' else 0.0
+        cleaned = (
+            str(price_str)
+            .replace('~', '').replace('₹', '').replace('Rs.', '').replace('Rs', '')
+            .replace('$', '').replace(',', '').strip()
+        )
+        return float(cleaned) if cleaned and cleaned.upper() != 'N/A' else 0.0
     except (ValueError, TypeError):
         return 0.0
 
@@ -166,7 +183,9 @@ def analyze_compare(review_text, product_name):
     2. Write a single punchy verdict sentence (max 20 words).
     3. List the top 3 specific strengths.
     4. List the top 3 specific weaknesses / complaints.
-    5. Estimate the typical retail price in USD based on your knowledge (e.g. "$349"). If unknown, use "N/A".
+    5. Estimate the typical retail price in INR (Indian Rupees) based on your knowledge
+       (e.g. "₹29999"). You MUST provide a realistic estimate — never return "N/A".
+       If the product is not officially sold in India, convert from USD at ~₹85/USD.
 
     OUTPUT FORMAT (STRICT JSON ONLY):
     {{
@@ -174,7 +193,7 @@ def analyze_compare(review_text, product_name):
         "vibe": "One punchy verdict sentence.",
         "pros": ["Strength 1", "Strength 2", "Strength 3"],
         "cons": ["Weakness 1", "Weakness 2", "Weakness 3"],
-        "price": "$349"
+        "price": "₹29999"
     }}
     """
     for attempt in range(3):
@@ -638,8 +657,8 @@ with tab_single:
                     st.markdown(f"""
                     <div class="gc" style="height:100%;">
                         <span class="micro">Product</span>
-                        <div class="prod-pill">📦 {product_query}</div>
-                        <div class="verdict-quote">{vibe}</div>
+                        <div class="prod-pill">📦 {h(product_query)}</div>
+                        <div class="verdict-quote">{h(vibe)}</div>
                         <div style="font-size:0.7rem;color:rgba(255,255,255,0.2);font-style:italic;margin-top:0.6rem;">Synthesised from live web search snippets &amp; community discussions</div>
                     </div>""", unsafe_allow_html=True)
 
@@ -647,10 +666,10 @@ with tab_single:
                 st.markdown("""<div class="sec-row"><span class="sec-num">02</span><span class="sec-label">Strengths &amp; Weaknesses</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
                 pc, cc = st.columns(2, gap="medium")
                 with pc:
-                    pros_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{p}</span></div>' for p in pros])
+                    pros_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{h(p)}</span></div>' for p in pros])
                     st.markdown(f'<div class="gc gc-green"><span class="micro" style="color:#22c98a !important;">What people love</span>{pros_html}</div>', unsafe_allow_html=True)
                 with cc:
-                    cons_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{c}</span></div>' for c in cons])
+                    cons_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{h(c)}</span></div>' for c in cons])
                     st.markdown(f'<div class="gc gc-red"><span class="micro" style="color:#e85d5d !important;">Common complaints</span>{cons_html}</div>', unsafe_allow_html=True)
 
                 # ── 03 Attribute Radar ────────────────────
@@ -716,10 +735,10 @@ with tab_compare:
                 vibe_a  = result_a.get('vibe', '')
                 vibe_b  = result_b.get('vibe', '')
                 # Use live scraped price; fall back to AI estimate if unavailable
-                ai_price_a = result_a.get('price', 'N/A')
-                ai_price_b = result_b.get('price', 'N/A')
-                price_a = scraped_price_a if scraped_price_a != 'N/A' else ai_price_a
-                price_b = scraped_price_b if scraped_price_b != 'N/A' else ai_price_b
+                ai_price_a = result_a.get('price', '')
+                ai_price_b = result_b.get('price', '')
+                price_a = scraped_price_a if scraped_price_a else (ai_price_a or '—')
+                price_b = scraped_price_b if scraped_price_b else (ai_price_b or '—')
                 label_a, color_a = score_to_label(score_a)
                 label_b, color_b = score_to_label(score_b)
                 winner  = product_a if score_a >= score_b else product_b
@@ -737,12 +756,12 @@ with tab_compare:
                         winner_html = ''
                     st.markdown(f"""
                     <div class="gc gc-amber compare-score-card">
-                        <span class="compare-product-name">{product_a}</span>
+                        <span class="compare-product-name">{h(product_a)}</span>
                         <div class="compare-score-big" style="color:{color_a};">{score_a}</div>
                         <div style="font-family:'DM Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
                         <div class="score-badge" style="color:{color_a};border-color:{color_a}40;background:{color_a}1a;margin-top:0.6rem;">{label_a}</div>
                         {winner_html}
-                        <div class="verdict-strip">{vibe_a}</div>
+                        <div class="verdict-strip">{h(vibe_a)}</div>
                     </div>""", unsafe_allow_html=True)
                 with cb:
                     if score_b > score_a:
@@ -753,12 +772,12 @@ with tab_compare:
                         winner_html_b = ''
                     st.markdown(f"""
                     <div class="gc gc-blue compare-score-card">
-                        <span class="compare-product-name">{product_b}</span>
+                        <span class="compare-product-name">{h(product_b)}</span>
                         <div class="compare-score-big" style="color:{color_b};">{score_b}</div>
                         <div style="font-family:'DM Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
                         <div class="score-badge" style="color:{color_b};border-color:{color_b}40;background:{color_b}1a;margin-top:0.6rem;">{label_b}</div>
                         {winner_html_b}
-                        <div class="verdict-strip">{vibe_b}</div>
+                        <div class="verdict-strip">{h(vibe_b)}</div>
                     </div>""", unsafe_allow_html=True)
 
                 # Score bar comparison chart
@@ -785,8 +804,8 @@ with tab_compare:
                     val_badge  = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val}</div>' if better_val else ''
                     st.markdown(f"""
                     <div class="gc" style="text-align:center;padding:1.4rem 1rem;">
-                        <span class="compare-product-name">{product_a}</span>
-                        <div class="compare-price">{price_a}</div>
+                        <span class="compare-product-name">{h(product_a)}</span>
+                        <div class="compare-price">{h(price_a)}</div>
                         <span class="compare-price-label">Est. retail price</span>
                         {val_badge}
                     </div>""", unsafe_allow_html=True)
@@ -803,8 +822,8 @@ with tab_compare:
                     val_badge_b = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val_b}</div>' if better_val_b else ''
                     st.markdown(f"""
                     <div class="gc" style="text-align:center;padding:1.4rem 1rem;">
-                        <span class="compare-product-name">{product_b}</span>
-                        <div class="compare-price">{price_b}</div>
+                        <span class="compare-product-name">{h(product_b)}</span>
+                        <div class="compare-price">{h(price_b)}</div>
                         <span class="compare-price-label">Est. retail price</span>
                         {val_badge_b}
                     </div>""", unsafe_allow_html=True)
@@ -813,20 +832,20 @@ with tab_compare:
                 st.markdown("""<div class="sec-row"><span class="sec-num">C3</span><span class="sec-label">Strengths</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
                 sa, sb = st.columns(2, gap="medium")
                 with sa:
-                    pros_a_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{p}</span></div>' for p in pros_a])
-                    st.markdown(f'<div class="gc gc-green"><span class="micro" style="color:#22c98a !important;">{product_a}</span>{pros_a_html}</div>', unsafe_allow_html=True)
+                    pros_a_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{h(p)}</span></div>' for p in pros_a])
+                    st.markdown(f'<div class="gc gc-green"><span class="micro" style="color:#22c98a !important;">{h(product_a)}</span>{pros_a_html}</div>', unsafe_allow_html=True)
                 with sb:
-                    pros_b_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{p}</span></div>' for p in pros_b])
-                    st.markdown(f'<div class="gc gc-green"><span class="micro" style="color:#22c98a !important;">{product_b}</span>{pros_b_html}</div>', unsafe_allow_html=True)
+                    pros_b_html = "".join([f'<div class="pci pci-pro"><span class="dot">▲</span><span>{h(p)}</span></div>' for p in pros_b])
+                    st.markdown(f'<div class="gc gc-green"><span class="micro" style="color:#22c98a !important;">{h(product_b)}</span>{pros_b_html}</div>', unsafe_allow_html=True)
 
                 st.markdown("""<div class="sec-row"><span class="sec-num">C4</span><span class="sec-label">Weaknesses</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
                 wa, wb = st.columns(2, gap="medium")
                 with wa:
-                    cons_a_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{c}</span></div>' for c in cons_a])
-                    st.markdown(f'<div class="gc gc-red"><span class="micro" style="color:#e85d5d !important;">{product_a}</span>{cons_a_html}</div>', unsafe_allow_html=True)
+                    cons_a_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{h(c)}</span></div>' for c in cons_a])
+                    st.markdown(f'<div class="gc gc-red"><span class="micro" style="color:#e85d5d !important;">{h(product_a)}</span>{cons_a_html}</div>', unsafe_allow_html=True)
                 with wb:
-                    cons_b_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{c}</span></div>' for c in cons_b])
-                    st.markdown(f'<div class="gc gc-red"><span class="micro" style="color:#e85d5d !important;">{product_b}</span>{cons_b_html}</div>', unsafe_allow_html=True)
+                    cons_b_html = "".join([f'<div class="pci pci-con"><span class="dot">▼</span><span>{h(c)}</span></div>' for c in cons_b])
+                    st.markdown(f'<div class="gc gc-red"><span class="micro" style="color:#e85d5d !important;">{h(product_b)}</span>{cons_b_html}</div>', unsafe_allow_html=True)
 
                 st.markdown("""<div style="text-align:center;padding:2rem 0 1rem;font-family:'DM Mono',monospace;font-size:0.65rem;color:rgba(255,255,255,0.14);letter-spacing:0.1em;">VIBECHECK · HEAD-TO-HEAD · POWERED BY GEMINI AI</div>""", unsafe_allow_html=True)
 
