@@ -12,10 +12,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 def h(text):
-    """Strip any HTML tags using regex, then HTML-escape user/AI text so it never breaks the surrounding HTML structure."""
+    """Strip any HTML tags (including escaped entities like &lt;div&gt;), then HTML-escape user/AI text so it never breaks the surrounding HTML structure."""
     if not text:
         return ""
-    cleaned = re.sub(r'<[^>]*>', '', str(text))
+    # Unescape HTML entities (e.g. &lt;div&gt; -> <div>) so regex can match and strip them
+    unescaped = _html.unescape(str(text))
+    cleaned = re.sub(r'<[^>]*>', '', unescaped)
     return _html.escape(cleaned)
 
 # ─── 1. CONFIGURATION ────────────────────────────────────────
@@ -445,47 +447,19 @@ html, body, [data-testid="stAppViewContainer"] { background: #000000 !important;
 
 *, p, div, span, label { font-family: 'Plus Jakarta Sans', sans-serif !important; color: rgba(255,255,255,0.85); }
 section.main > div { padding-top: 0; max-width: 960px; margin: auto; }
+/* Allow hero to bleed edge-to-edge */
+section.main > div:first-child { max-width: 100% !important; padding: 0 !important; overflow: visible !important; }
+[data-testid="block-container"] { padding-top: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }
 
-/* ── Hero wrap ── */
+/* ── Hero wrap: full-viewport ── */
 .hero-outer {
-    position: relative; width: 100%; margin-bottom: 0;
-    border-radius: 0 0 24px 24px;
+    position: relative;
+    width: 100vw;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 0;
     overflow: hidden;
     border-bottom: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.8);
-}
-.hero-caption {
-    position: absolute; bottom: 0; left: 0; right: 0;
-    padding: 2rem 2.5rem 1.8rem;
-    background: linear-gradient(to top, rgba(0,0,0,0.98) 0%, rgba(0,0,0,0.6) 55%, transparent 100%);
-    display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem;
-    z-index: 10;
-}
-.hero-logo {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
-    font-size: 3rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1;
-    color: #fff !important;
-    text-shadow: none;
-}
-.hero-logo em {
-    font-style: normal;
-    background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-.hero-sub {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase;
-    color: rgba(255,255,255,0.4) !important; padding-bottom: 0.3rem;
-}
-.hero-badge {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase;
-    color: rgba(255,255,255,0.6) !important;
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 20px; padding: 0.3rem 0.9rem;
-    background: rgba(255,255,255,0.05);
-    white-space: nowrap;
 }
 
 /* ── Tabs ── */
@@ -658,10 +632,192 @@ section.main > div { padding-top: 0; max-width: 960px; margin: auto; }
 [data-testid="stSpinner"] p { font-family:'JetBrains Mono',monospace !important; color:rgba(255,255,255,0.45) !important; font-size:0.8rem !important; }
 
 [data-testid="stAlert"] { background:#09090b !important; border:1px solid rgba(255,255,255,0.08) !important; border-radius:8px !important; }
-/* Spline iframe */
-[data-testid="stIFrame"] { border-radius: 0 !important; }
+/* Spline iframe: fullscreen — pointer-events auto so cursor tracking works */
+[data-testid="stIFrame"] {
+    border-radius: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    position: relative !important;
+}
 .js-plotly-plot .plotly, .js-plotly-plot .plotly .plot-container { background: transparent !important; }
 </style>
+"""
+
+# ─── 5b. MINI LOADING OVERLAY HTML ──────────────────────────
+
+LOADING_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<script type="module" src="https://unpkg.com/@splinetool/viewer@1.9.79/build/spline-viewer.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; background:#000; overflow:hidden; }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Miniature Spline — desaturated, dim */
+  .spline-mini {
+    position: absolute;
+    inset: 0;
+    opacity: 0.35;
+    filter: grayscale(0.4) brightness(0.7);
+  }
+  spline-viewer { width:100%; height:100%; display:block; }
+
+  /* Dark vignette so text pops */
+  .vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.85) 100%);
+    pointer-events: none;
+  }
+
+  /* Watermark blocker */
+  .wm-block {
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 200px; height: 70px;
+    background: #000;
+    z-index: 99999;
+    pointer-events: none;
+  }
+
+  /* Content */
+  .content {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.4rem;
+  }
+
+  /* Wordmark */
+  .wordmark {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 2.6rem;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    color: #fff;
+    opacity: 0.92;
+  }
+  .wordmark span {
+    background: linear-gradient(135deg, #fff 30%, #6b6b7b 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Animated thinking dots line */
+  .status-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .dots span {
+    display: inline-block;
+    animation: blink 1.4s ease-in-out infinite;
+    opacity: 0;
+  }
+  .dots span:nth-child(2) { animation-delay: 0.22s; }
+  .dots span:nth-child(3) { animation-delay: 0.44s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0; }
+    40%           { opacity: 1; }
+  }
+
+  /* Shimmer progress bar */
+  .progress-wrap {
+    width: 220px;
+    height: 2px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
+    border-radius: 2px;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0%   { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
+
+  /* Cycling status messages */
+  #msg { min-height: 1em; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="spline-mini">
+    <spline-viewer url="https://prod.spline.design/bBLr7TJSLnKwHY5A/scene.splinecode"
+                   loading-anim-type="none"></spline-viewer>
+  </div>
+  <div class="vignette"></div>
+  <div class="wm-block"></div>
+
+  <div class="content">
+    <div class="wordmark">VIBE<span>CHECK</span></div>
+
+    <div class="status-line">
+      <span id="msg">Scouring the web</span>
+      <span class="dots"><span>.</span><span>.</span><span>.</span></span>
+    </div>
+
+    <div class="progress-wrap"><div class="progress-bar"></div></div>
+  </div>
+</div>
+
+<script>
+  /* Suppress Spline watermark in shadow DOM */
+  const sl = setInterval(() => {
+    const v = document.querySelector('spline-viewer');
+    if (v && v.shadowRoot) {
+      const s = document.createElement('style');
+      s.textContent = '#logo,#spline-logo,a[href*="spline"],.spline-watermark,[class*="watermark"],[id*="logo"]{display:none!important}';
+      v.shadowRoot.appendChild(s);
+      clearInterval(sl);
+    }
+  }, 30);
+  setTimeout(() => clearInterval(sl), 12000);
+
+  /* Cycle through thinking messages */
+  const msgs = [
+    'Scouring the web',
+    'Reading signals',
+    'Weighing sentiment',
+    'Crunching numbers',
+    'Consulting Gemini',
+    'Building your report',
+  ];
+  let i = 0;
+  const el = document.getElementById('msg');
+  setInterval(() => { i = (i + 1) % msgs.length; el.textContent = msgs[i]; }, 1800);
+</script>
+</body>
+</html>
 """
 
 # ─── 6. PAGE SETUP ───────────────────────────────────────────
@@ -678,46 +834,136 @@ components.html("""
 <head>
 <meta charset="UTF-8">
 <script type="module" src="https://unpkg.com/@splinetool/viewer@1.9.79/build/spline-viewer.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@800;900&display=swap" rel="stylesheet">
 <style>
-  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-  .wrap { width: 100%; height: 480px; }
-  spline-viewer { width: 100%; height: 100%; display: block; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100vh; overflow: hidden; background: #000; }
+
+  .scene { position: relative; width: 100%; height: 100vh; }
+
+  spline-viewer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* Suppress every possible Spline watermark element */
+  .scene::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 200px; height: 70px;
+    background: #000;
+    z-index: 99999;
+    pointer-events: none;
+  }
+
+  /* ── Huge brand logo overlay ── */
+  .brand {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+  }
+  .brand-wordmark {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: clamp(4rem, 12vw, 9rem);
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 0.9;
+    color: #ffffff;
+    text-shadow:
+      0 0 80px rgba(255,255,255,0.12),
+      0 4px 32px rgba(0,0,0,0.9);
+  }
+  .brand-wordmark span {
+    background: linear-gradient(135deg, #ffffff 30%, #6b6b7b 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .brand-sub {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: clamp(0.6rem, 1.5vw, 0.85rem);
+    font-weight: 500;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.38);
+    margin-top: 1rem;
+  }
+
+  /* ── Scroll arrow ── */
+  .scroll-hint {
+    position: absolute;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    pointer-events: none;
+  }
+  .scroll-hint span {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 0.58rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.28);
+  }
+  .scroll-hint svg {
+    animation: bounce 1.8s ease-in-out infinite;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); opacity: 0.3; }
+    50%       { transform: translateY(6px); opacity: 0.7; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <spline-viewer url="https://prod.spline.design/bBLr7TJSLnKwHY5A/scene.splinecode"
-                 loading-anim-type="spinner-small-dark">
+<div class="scene">
+  <spline-viewer
+    url="https://prod.spline.design/bBLr7TJSLnKwHY5A/scene.splinecode"
+    loading-anim-type="spinner-small-dark">
   </spline-viewer>
+
+  <!-- Brand logo on top -->
+  <div class="brand">
+    <div class="brand-wordmark">VIBE<span>CHECK</span></div>
+    <div class="brand-sub">Product Intelligence Engine</div>
+  </div>
+
+  <!-- Scroll hint -->
+  <div class="scroll-hint">
+    <span>Scroll to explore</span>
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <path d="M3 6l6 6 6-6" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
 </div>
+
 <script>
-  const checkLogo = setInterval(() => {
+  /* Suppress Spline shadow-DOM logo */
+  const suppressLogo = setInterval(() => {
     const viewer = document.querySelector('spline-viewer');
     if (viewer && viewer.shadowRoot) {
       const shadow = viewer.shadowRoot;
-      const logo = shadow.querySelector('#logo') || shadow.querySelector('#spline-logo') || shadow.querySelector('a');
-      if (logo) {
-        const style = document.createElement('style');
-        style.textContent = '#logo, #spline-logo, a, .spline-watermark { display: none !important; }';
-        shadow.appendChild(style);
-        clearInterval(checkLogo);
-      }
+      const s = document.createElement('style');
+      s.textContent = `
+        #logo, #spline-logo, a[href*="spline"], .spline-watermark,
+        [class*="watermark"], [id*="logo"] { display: none !important; }
+      `;
+      shadow.appendChild(s);
+      clearInterval(suppressLogo);
     }
-  }, 50);
-  setTimeout(() => clearInterval(checkLogo), 10000);
+  }, 30);
+  setTimeout(() => clearInterval(suppressLogo), 12000);
 </script>
 </body>
 </html>
-""", height=480, scrolling=False)
-
-st.markdown("""
-<div class="hero-caption">
-  <div>
-    <div class="hero-logo">VIBE<em>CHECK</em></div>
-    <div class="hero-sub">Product Intelligence Engine</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+""", height=700, scrolling=False)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -738,6 +984,9 @@ with tab_single:
     analyze_btn = st.button("Run Intelligence Check →", key="single_btn")
 
     if analyze_btn and product_query:
+        _loader = st.empty()
+        with _loader:
+            components.html(LOADING_HTML, height=280, scrolling=False)
         with st.spinner("Scouring the web for signals…"):
             data = get_reviews_data(product_query)
 
@@ -745,6 +994,8 @@ with tab_single:
             char_count = len(data)
             with st.spinner("Quantifying sentiment with Gemini…"):
                 analysis = analyze_sentiment(data, product_query)
+
+            _loader.empty()
 
             if analysis:
                 score  = analysis.get('score', 0)
@@ -757,36 +1008,34 @@ with tab_single:
                 st.markdown("""<div class="sec-row"><span class="sec-num">01</span><span class="sec-label">Overview</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
                 left, right = st.columns([1, 1.7], gap="large")
                 with left:
-                    st.markdown(f"""
-                    <div class="gc gc-amber">
-                        <span class="micro">Sentiment Score</span>
-                        <div><span class="score-num" style="color:{color};">{score}</span><span class="score-denom">/100</span></div>
-                        <div class="score-badge" style="color:{color}; border-color:{color}40; background:{color}1a;">{label}</div>
-                        <div class="data-strip">
-                            <div class="data-cell">
-                                <div class="data-val">{len(pros)}</div>
-                                <span class="data-key">Strengths</span>
-                            </div>
-                            <div class="data-cell">
-                                <div class="data-val">{len(cons)}</div>
-                                <span class="data-key">Weaknesses</span>
-                            </div>
-                            <div class="data-cell">
-                                <div class="data-val">{char_count // 100}k</div>
-                                <span class="data-key">Signals</span>
-                            </div>
-                        </div>
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc gc-amber">
+<span class="micro">Sentiment Score</span>
+<div><span class="score-num" style="color:{color};">{score}</span><span class="score-denom">/100</span></div>
+<div class="score-badge" style="color:{color}; border-color:{color}40; background:{color}1a;">{label}</div>
+<div class="data-strip">
+<div class="data-cell">
+<div class="data-val">{len(pros)}</div>
+<span class="data-key">Strengths</span>
+</div>
+<div class="data-cell">
+<div class="data-val">{len(cons)}</div>
+<span class="data-key">Weaknesses</span>
+</div>
+<div class="data-cell">
+<div class="data-val">{char_count // 100}k</div>
+<span class="data-key">Signals</span>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
                     st.plotly_chart(build_gauge(score), use_container_width=True,
                                     config={"displayModeBar": False})
                 with right:
-                    st.markdown(f"""
-                    <div class="gc" style="height:100%;">
-                        <span class="micro">Product</span>
-                        <div class="prod-pill">📦 {h(product_query)}</div>
-                        <div class="verdict-quote">{h(vibe)}</div>
-                        <div style="font-size:0.7rem;color:rgba(255,255,255,0.2);font-style:italic;margin-top:0.6rem;">Synthesised from live web search snippets &amp; community discussions</div>
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc" style="height:100%;">
+<span class="micro">Product</span>
+<div class="prod-pill">📦 {h(product_query)}</div>
+<div class="verdict-quote">{h(vibe)}</div>
+<div style="font-size:0.7rem;color:rgba(255,255,255,0.2);font-style:italic;margin-top:0.6rem;">Synthesised from live web search snippets &amp; community discussions</div>
+</div>""", unsafe_allow_html=True)
 
                 # ── 02 Strengths & Weaknesses ─────────────
                 st.markdown("""<div class="sec-row"><span class="sec-num">02</span><span class="sec-label">Strengths &amp; Weaknesses</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
@@ -835,6 +1084,9 @@ with tab_compare:
     compare_btn = st.button("Run Comparison →", key="compare_btn")
 
     if compare_btn and product_a and product_b:
+        _cmp_loader = st.empty()
+        with _cmp_loader:
+            components.html(LOADING_HTML, height=280, scrolling=False)
 
         # Fetch data for both concurrently using st.spinner
         with st.spinner(f"Researching {product_a}…"):
@@ -850,6 +1102,8 @@ with tab_compare:
                 result_a = analyze_compare(data_a, product_a)
                 time.sleep(2)  # Avoid quota collision
                 result_b = analyze_compare(data_b, product_b)
+
+            _cmp_loader.empty()
 
             if result_a and result_b:
                 score_a = result_a.get('score', 0)
@@ -880,15 +1134,14 @@ with tab_compare:
                         winner_html = '<div class="winner-badge" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:rgba(255,255,255,0.45)!important;">🤝 Tie</div>'
                     else:
                         winner_html = ''
-                    st.markdown(f"""
-                    <div class="gc gc-amber compare-score-card">
-                        <span class="compare-product-name">{h(product_a)}</span>
-                        <div class="compare-score-big" style="color:{color_a};">{score_a}</div>
-                        <div style="font-family:'DM Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
-                        <div class="score-badge" style="color:{color_a};border-color:{color_a}40;background:{color_a}1a;margin-top:0.6rem;">{label_a}</div>
-                        {winner_html}
-                        <div class="verdict-strip">{h(vibe_a)}</div>
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc gc-amber compare-score-card">
+<span class="compare-product-name">{h(product_a)}</span>
+<div class="compare-score-big" style="color:{color_a};">{score_a}</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
+<div class="score-badge" style="color:{color_a};border-color:{color_a}40;background:{color_a}1a;margin-top:0.6rem;">{label_a}</div>
+{winner_html}
+<div class="verdict-strip">{h(vibe_a)}</div>
+</div>""", unsafe_allow_html=True)
                 with cb:
                     if score_b > score_a:
                         winner_html_b = '<div class="winner-badge">🏆 Winner</div>'
@@ -896,15 +1149,14 @@ with tab_compare:
                         winner_html_b = '<div class="winner-badge" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:rgba(255,255,255,0.45)!important;">🤝 Tie</div>'
                     else:
                         winner_html_b = ''
-                    st.markdown(f"""
-                    <div class="gc gc-blue compare-score-card">
-                        <span class="compare-product-name">{h(product_b)}</span>
-                        <div class="compare-score-big" style="color:{color_b};">{score_b}</div>
-                        <div style="font-family:'DM Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
-                        <div class="score-badge" style="color:{color_b};border-color:{color_b}40;background:{color_b}1a;margin-top:0.6rem;">{label_b}</div>
-                        {winner_html_b}
-                        <div class="verdict-strip">{h(vibe_b)}</div>
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc gc-blue compare-score-card">
+<span class="compare-product-name">{h(product_b)}</span>
+<div class="compare-score-big" style="color:{color_b};">{score_b}</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:rgba(255,255,255,0.2);">/100</div>
+<div class="score-badge" style="color:{color_b};border-color:{color_b}40;background:{color_b}1a;margin-top:0.6rem;">{label_b}</div>
+{winner_html_b}
+<div class="verdict-strip">{h(vibe_b)}</div>
+</div>""", unsafe_allow_html=True)
 
                 # Score bar comparison chart
                 st.markdown('<span class="ch-cap" style="margin-top:0.5rem;">Sentiment score comparison</span>', unsafe_allow_html=True)
@@ -928,13 +1180,12 @@ with tab_compare:
                     except Exception:
                         better_val = ""
                     val_badge  = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val}</div>' if better_val else ''
-                    st.markdown(f"""
-                    <div class="gc" style="text-align:center;padding:1.4rem 1rem;">
-                        <span class="compare-product-name">{h(product_a)}</span>
-                        <div class="compare-price">{h(price_a)}</div>
-                        <span class="compare-price-label">Est. retail price</span>
-                        {val_badge}
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc" style="text-align:center;padding:1.4rem 1rem;">
+<span class="compare-product-name">{h(product_a)}</span>
+<div class="compare-price">{h(price_a)}</div>
+<span class="compare-price-label">Est. retail price</span>
+{val_badge}
+</div>""", unsafe_allow_html=True)
                 with pb_col:
                     try:
                         pf_a = safe_price_float(price_a)
@@ -946,13 +1197,12 @@ with tab_compare:
                     except Exception:
                         better_val_b = ""
                     val_badge_b = f'<div class="winner-badge" style="font-size:0.58rem;">💰 {better_val_b}</div>' if better_val_b else ''
-                    st.markdown(f"""
-                    <div class="gc" style="text-align:center;padding:1.4rem 1rem;">
-                        <span class="compare-product-name">{h(product_b)}</span>
-                        <div class="compare-price">{h(price_b)}</div>
-                        <span class="compare-price-label">Est. retail price</span>
-                        {val_badge_b}
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="gc" style="text-align:center;padding:1.4rem 1rem;">
+<span class="compare-product-name">{h(product_b)}</span>
+<div class="compare-price">{h(price_b)}</div>
+<span class="compare-price-label">Est. retail price</span>
+{val_badge_b}
+</div>""", unsafe_allow_html=True)
 
                 # ── C3  Pros & Cons Side by Side ──────────
                 st.markdown("""<div class="sec-row"><span class="sec-num">C3</span><span class="sec-label">Strengths</span><div class="sec-rule"></div></div>""", unsafe_allow_html=True)
