@@ -20,13 +20,13 @@ def h(text):
     cleaned = re.sub(r'<[^>]*>', '', unescaped)
     return _html.escape(cleaned)
 
-# ─── 1. CONFIGURATION ────────────────────────────────────────
+# CONFIGURATION 
 load_dotenv()
 
 SERPER_API_KEY = st.secrets.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-# ─── 2. CORE LOGIC (UNCHANGED) ───────────────────────────────
+# CORE LOGIC
 
 def get_reviews_data(product_name):
     if not SERPER_API_KEY:
@@ -112,7 +112,7 @@ def analyze_sentiment(review_text, product_name):
     return None
 
 
-# ─── 3. COMPARE HELPERS (NEW) ────────────────────────────────
+# COMPARE HELPERS (NEW)
 
 def get_price(product_name):
     """Fetch estimated retail price via Serper shopping search (India, INR)."""
@@ -258,7 +258,7 @@ def analyze_compare(review_text, product_name):
     return None
 
 
-# ─── 4. CHART HELPERS ────────────────────────────────────────
+# CHART HELPERS
 
 def score_to_label(score):
     if score >= 80: return "Highly Recommended", "#10b981"
@@ -431,8 +431,7 @@ def build_compare_score_bar(name_a, score_a, name_b, score_b):
     return fig
 
 
-# ─── 5. CSS ──────────────────────────────────────────────────
-
+# CSS 
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
@@ -967,7 +966,7 @@ components.html("""
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ─── 7. TABS ─────────────────────────────────────────────────
+# TABS
 
 
 tab_single, tab_compare = st.tabs(["Single Analysis", "Head-to-Head Compare"])
